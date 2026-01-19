@@ -1,11 +1,13 @@
 import { db, type ProcessingCheckpoint } from './db';
 
+type JobType = ProcessingCheckpoint['jobType'];
+
 /**
  * Load active checkpoint for a specific job type
  * Returns null if no active checkpoint exists
  */
 export async function loadCheckpoint(
-  jobType: 'categorize' | 'archive' | 'metadata'
+  jobType: JobType
 ): Promise<ProcessingCheckpoint | null> {
   const checkpoints = await db.checkpoints
     .where('jobType')
@@ -39,7 +41,7 @@ export async function saveCheckpoint(checkpoint: ProcessingCheckpoint): Promise<
  * Clear checkpoint when job is complete
  */
 export async function clearCheckpoint(
-  jobType: 'categorize' | 'archive' | 'metadata'
+  jobType: JobType
 ): Promise<void> {
   // Mark all running checkpoints for this job type as completed
   const checkpoints = await db.checkpoints
@@ -60,7 +62,7 @@ export async function clearCheckpoint(
  * Mark checkpoint as failed
  */
 export async function failCheckpoint(
-  jobType: 'categorize' | 'archive' | 'metadata',
+  jobType: JobType,
   error: string
 ): Promise<void> {
   const checkpoint = await loadCheckpoint(jobType);

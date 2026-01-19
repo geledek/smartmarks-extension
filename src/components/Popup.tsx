@@ -16,6 +16,7 @@ export function Popup() {
   const [loading, setLoading] = useState(false);
   const { isFirstRun, completeFirstRun } = useFirstRun();
   const [showPermissionDialog, setShowPermissionDialog] = useState(false);
+  const [isGroupingTabs, setIsGroupingTabs] = useState(false);
 
   useEffect(() => {
     loadRecentBookmarks();
@@ -66,6 +67,22 @@ export function Popup() {
   function handlePermissionDialogClose() {
     setShowPermissionDialog(false);
     completeFirstRun();
+  }
+
+  // v1.2.0: Group tabs handler
+  async function handleGroupTabs() {
+    setIsGroupingTabs(true);
+    try {
+      const response = await chrome.runtime.sendMessage({ type: 'GROUP_TABS' });
+      if (response?.success) {
+        // Brief success indicator - the user will see the grouped tabs
+        console.log(`Grouped ${response.result.grouped} tabs`);
+      }
+    } catch (error) {
+      console.error('Tab grouping error:', error);
+    } finally {
+      setIsGroupingTabs(false);
+    }
   }
 
   return (
@@ -154,12 +171,20 @@ export function Popup() {
       </div>
 
       {/* Footer */}
-      <div className="p-3 border-t border-gray-200">
+      <div className="p-3 border-t border-gray-200 flex gap-2">
+        {/* v1.2.0: Group Tabs Button */}
+        <button
+          onClick={handleGroupTabs}
+          disabled={isGroupingTabs}
+          className="flex-1 py-2 text-sm text-purple-600 hover:text-purple-700 font-medium border border-purple-200 rounded hover:bg-purple-50 disabled:opacity-50"
+        >
+          {isGroupingTabs ? 'Grouping...' : 'Group Tabs'}
+        </button>
         <button
           onClick={() => chrome.runtime.openOptionsPage()}
-          className="w-full py-2 text-sm text-blue-600 hover:text-blue-700 font-medium"
+          className="flex-1 py-2 text-sm text-blue-600 hover:text-blue-700 font-medium"
         >
-          Open Dashboard
+          Dashboard
         </button>
       </div>
 

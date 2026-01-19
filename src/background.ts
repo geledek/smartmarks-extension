@@ -3,6 +3,10 @@ import { categorizeBookmark, generateContentHash, findDuplicates } from './categ
 import { flattenBookmarkTree, hasPermission } from './utils';
 import { extractMetadata } from './metadata';
 import { loadCheckpoint, saveCheckpoint, clearCheckpoint, cleanupOldCheckpoints } from './checkpoints';
+import { analyzeExistingHistory, hasAnalyzedHistory, getAnalysisStats } from './historyAnalyzer';
+import { trackCandidateUrl, recalculateCandidateWindowVisits, getCandidateStats, getTopCandidates } from './candidateTracker';
+import { groupTabsByCategory, ungroupAllTabs, getTabGroupStats } from './tabGrouping';
+import { parsePreferences, saveRulesToDatabase, formatRulesForDisplay } from './naturalLanguageParser';
 
 /// <reference types="chrome"/>
 
@@ -19,8 +23,21 @@ chrome.runtime.onInstalled.addListener(async () => {
   chrome.alarms.create('categorize', { periodInMinutes: 15 });
   chrome.alarms.create('archive', { periodInMinutes: 60 * 24 }); // Daily
 
+  // v1.2.0: Set up auto-bookmarking alarms
+  chrome.alarms.create('recalculateCandidates', { periodInMinutes: 60 }); // Hourly
+
   // Set up optional history tracking if permission granted
   await setupHistoryTracking();
+
+  // v1.2.0: Schedule history analysis if not yet done
+  const hasHistoryPermission = await hasPermission('history');
+  if (hasHistoryPermission) {
+    const alreadyAnalyzed = await hasAnalyzedHistory();
+    if (!alreadyAnalyzed) {
+      // Delay analysis to let extension settle
+      chrome.alarms.create('analyzeHistory', { delayInMinutes: 0.5 });
+    }
+  }
 });
 
 // On startup, check for incomplete jobs and resume them
@@ -69,6 +86,12 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
     await runCategorizationTask();
   } else if (alarm.name === 'archive') {
     await runArchivingTask();
+  } else if (alarm.name === 'analyzeHistory') {
+    // v1.2.0: Run one-time history analysis
+    await analyzeExistingHistory();
+  } else if (alarm.name === 'recalculateCandidates') {
+    // v1.2.0: Recalculate time-windowed visits for candidates
+    await recalculateCandidateWindowVisits();
   }
 });
 
@@ -184,12 +207,18 @@ async function fetchAndUpdateMetadata(bookmarkId: string, url: string) {
 /**
  * Track visit to a URL
  */
-async function trackVisit(url: string) {
+async function trackVisit(url: string, title?: string) {
   const settings = await db.settings.get('local');
   if (!settings) return;
 
   // Check if URL is excluded
-  const domain = new URL(url).hostname;
+  let domain: string;
+  try {
+    domain = new URL(url).hostname;
+  } catch {
+    return; // Invalid URL
+  }
+
   if (settings.excludedDomains.some(d => domain.includes(d))) {
     return;
   }
@@ -211,6 +240,9 @@ async function trackVisit(url: string) {
       timestamp: Date.now(),
       duration: 0 // Will be updated when tab closes
     });
+  } else if (settings.autoBookmarkEnabled) {
+    // v1.2.0: Track as candidate if not bookmarked and auto-bookmarking is enabled
+    await trackCandidateUrl(url, title);
   }
 }
 
@@ -459,10 +491,17 @@ async function setupHistoryTracking() {
     // Set up history listener
     chrome.history.onVisited.addListener(async (historyItem) => {
       if (historyItem.url) {
-        await trackVisit(historyItem.url);
+        await trackVisit(historyItem.url, historyItem.title);
       }
     });
     console.log('History tracking enabled');
+
+    // v1.2.0: Check if history analysis needed
+    const alreadyAnalyzed = await hasAnalyzedHistory();
+    if (!alreadyAnalyzed) {
+      // Schedule analysis
+      chrome.alarms.create('analyzeHistory', { delayInMinutes: 0.5 });
+    }
   } else {
     console.log('History tracking disabled - permission not granted');
   }
@@ -501,6 +540,77 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       }
     });
     sendResponse({ success: true });
+  }
+  // v1.2.0: Tab grouping messages
+  else if (message.type === 'GROUP_TABS') {
+    groupTabsByCategory().then(result => {
+      sendResponse({ success: true, result });
+    }).catch(error => {
+      console.error('Tab grouping failed:', error);
+      sendResponse({ success: false, error: error.message });
+    });
+  }
+  else if (message.type === 'UNGROUP_TABS') {
+    ungroupAllTabs().then(count => {
+      sendResponse({ success: true, ungrouped: count });
+    }).catch(error => {
+      console.error('Tab ungrouping failed:', error);
+      sendResponse({ success: false, error: error.message });
+    });
+  }
+  else if (message.type === 'GET_TAB_GROUP_STATS') {
+    getTabGroupStats().then(stats => {
+      sendResponse({ success: true, stats });
+    }).catch(error => {
+      sendResponse({ success: false, error: error.message });
+    });
+  }
+  // v1.2.0: History analysis messages
+  else if (message.type === 'ANALYZE_HISTORY') {
+    analyzeExistingHistory().then(result => {
+      sendResponse({ success: true, result });
+    }).catch(error => {
+      console.error('History analysis failed:', error);
+      sendResponse({ success: false, error: error.message });
+    });
+  }
+  else if (message.type === 'GET_ANALYSIS_STATS') {
+    getAnalysisStats().then(stats => {
+      sendResponse({ success: true, stats });
+    }).catch(error => {
+      sendResponse({ success: false, error: error.message });
+    });
+  }
+  // v1.2.0: Candidate tracking messages
+  else if (message.type === 'GET_CANDIDATE_STATS') {
+    getCandidateStats().then(stats => {
+      sendResponse({ success: true, stats });
+    }).catch(error => {
+      sendResponse({ success: false, error: error.message });
+    });
+  }
+  else if (message.type === 'GET_TOP_CANDIDATES') {
+    getTopCandidates(message.limit || 10).then(candidates => {
+      sendResponse({ success: true, candidates });
+    }).catch(error => {
+      sendResponse({ success: false, error: error.message });
+    });
+  }
+  // v1.2.0: Natural language preferences
+  else if (message.type === 'SAVE_PREFERENCES') {
+    const rules = parsePreferences(message.text);
+    saveRulesToDatabase(rules).then(() => {
+      const formatted = formatRulesForDisplay(rules);
+      sendResponse({ success: true, rules: formatted });
+    }).catch(error => {
+      console.error('Failed to save preferences:', error);
+      sendResponse({ success: false, error: error.message });
+    });
+  }
+  else if (message.type === 'PARSE_PREFERENCES') {
+    const rules = parsePreferences(message.text);
+    const formatted = formatRulesForDisplay(rules);
+    sendResponse({ success: true, rules: formatted });
   }
   return true; // Keep message channel open for async response
 });

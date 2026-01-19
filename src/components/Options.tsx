@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
-import { db, type Bookmark } from '../db';
+import { useState, useEffect, useCallback } from 'react';
+import { db, type Bookmark, type Settings } from '../db';
 import { HistoryPermissionToggle } from './PermissionDialog';
+import { hasPermission } from '../utils';
 
 /**
  * SmartMarks Options/Dashboard Component
@@ -18,9 +19,51 @@ export function Options() {
   const [editingBookmark, setEditingBookmark] = useState<Bookmark | null>(null);
   const [exportingToChrome, setExportingToChrome] = useState(false);
 
+  // v1.2.0: New state for auto-bookmarking and tab grouping
+  const [settings, setSettings] = useState<Settings | null>(null);
+  const [preferencesText, setPreferencesText] = useState('');
+  const [interpretedRules, setInterpretedRules] = useState<string[]>([]);
+  const [isGroupingTabs, setIsGroupingTabs] = useState(false);
+  const [isAnalyzingHistory, setIsAnalyzingHistory] = useState(false);
+  const [hasHistoryPermission, setHasHistoryPermission] = useState(false);
+  const [analysisStats, setAnalysisStats] = useState<{
+    hasAnalyzed: boolean;
+    analyzedAt?: number;
+    candidateCount: number;
+    activeBookmarks: number;
+  } | null>(null);
+
+  // Load settings and check permissions
+  const loadSettings = useCallback(async () => {
+    const s = await db.settings.get('local');
+    setSettings(s || null);
+    if (s?.naturalLanguagePreferences) {
+      setPreferencesText(s.naturalLanguagePreferences);
+      // Parse and display current rules
+      const response = await chrome.runtime.sendMessage({
+        type: 'PARSE_PREFERENCES',
+        text: s.naturalLanguagePreferences
+      });
+      if (response?.success) {
+        setInterpretedRules(response.rules);
+      }
+    }
+
+    const historyPerm = await hasPermission('history');
+    setHasHistoryPermission(historyPerm);
+
+    if (historyPerm) {
+      const statsResponse = await chrome.runtime.sendMessage({ type: 'GET_ANALYSIS_STATS' });
+      if (statsResponse?.success) {
+        setAnalysisStats(statsResponse.stats);
+      }
+    }
+  }, []);
+
   useEffect(() => {
     loadStats();
-  }, []);
+    loadSettings();
+  }, [loadSettings]);
 
   async function loadStats() {
     const allBookmarks = await db.bookmarks.toArray();
@@ -104,6 +147,96 @@ export function Options() {
       console.error('Failed to delete bookmark:', error);
       alert('Failed to delete bookmark. See console for details.');
     }
+  }
+
+  // v1.2.0: Tab grouping handler
+  async function handleGroupTabs() {
+    setIsGroupingTabs(true);
+    try {
+      const response = await chrome.runtime.sendMessage({ type: 'GROUP_TABS' });
+      if (response?.success) {
+        alert(`Grouped ${response.result.grouped} tabs into ${response.result.groups.length} groups. ${response.result.ungrouped} tabs could not be grouped.`);
+      } else {
+        alert('Failed to group tabs: ' + (response?.error || 'Unknown error'));
+      }
+    } catch (error) {
+      console.error('Tab grouping error:', error);
+      alert('Failed to group tabs. See console for details.');
+    } finally {
+      setIsGroupingTabs(false);
+    }
+  }
+
+  // v1.2.0: History analysis handler
+  async function handleAnalyzeHistory() {
+    if (!hasHistoryPermission) {
+      alert('History permission is required. Please enable it in the Permissions section.');
+      return;
+    }
+
+    setIsAnalyzingHistory(true);
+    try {
+      const response = await chrome.runtime.sendMessage({ type: 'ANALYZE_HISTORY' });
+      if (response?.success) {
+        alert(`History analysis started. ${response.result.bookmarksCreated} bookmarks created so far, ${response.result.candidatesAdded} candidates added.`);
+        await loadSettings();
+        await loadStats();
+      } else {
+        alert('Failed to analyze history: ' + (response?.error || 'Unknown error'));
+      }
+    } catch (error) {
+      console.error('History analysis error:', error);
+      alert('Failed to analyze history. See console for details.');
+    } finally {
+      setIsAnalyzingHistory(false);
+    }
+  }
+
+  // v1.2.0: Save natural language preferences
+  async function handleSavePreferences() {
+    try {
+      // Save to settings
+      await db.settings.update('local', {
+        naturalLanguagePreferences: preferencesText
+      });
+
+      // Parse and save rules
+      const response = await chrome.runtime.sendMessage({
+        type: 'SAVE_PREFERENCES',
+        text: preferencesText
+      });
+
+      if (response?.success) {
+        setInterpretedRules(response.rules);
+        alert('Preferences saved successfully!');
+      } else {
+        alert('Failed to save preferences: ' + (response?.error || 'Unknown error'));
+      }
+    } catch (error) {
+      console.error('Failed to save preferences:', error);
+      alert('Failed to save preferences. See console for details.');
+    }
+  }
+
+  // v1.2.0: Preview rules without saving
+  async function handlePreviewRules() {
+    const response = await chrome.runtime.sendMessage({
+      type: 'PARSE_PREFERENCES',
+      text: preferencesText
+    });
+
+    if (response?.success) {
+      setInterpretedRules(response.rules);
+    }
+  }
+
+  // v1.2.0: Toggle auto-bookmarking
+  async function handleToggleAutoBookmark() {
+    if (!settings) return;
+
+    const newValue = !settings.autoBookmarkEnabled;
+    await db.settings.update('local', { autoBookmarkEnabled: newValue });
+    setSettings({ ...settings, autoBookmarkEnabled: newValue });
   }
 
   async function exportToChromeBookmarkFolders() {
@@ -268,21 +401,41 @@ export function Options() {
               </div>
             </div>
 
-            {/* Export Button */}
-            <div className="mb-6">
-              <button
-                onClick={exportToChromeBookmarkFolders}
-                disabled={exportingToChrome || stats.byCategory.length === 0}
-                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <svg className="mr-2 h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-                </svg>
-                {exportingToChrome ? 'Exporting...' : 'Export to Chrome Bookmark Folders'}
-              </button>
-              <p className="text-sm text-gray-500 mt-2">
-                Organize all bookmarks into category folders in Chrome under "SmartMarks"
-              </p>
+            {/* Action Buttons */}
+            <div className="mb-6 flex flex-wrap gap-4">
+              {/* v1.2.0: Group Tabs Button */}
+              <div>
+                <button
+                  onClick={handleGroupTabs}
+                  disabled={isGroupingTabs}
+                  className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-purple-600 hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <svg className="mr-2 h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+                  </svg>
+                  {isGroupingTabs ? 'Grouping...' : 'Group Open Tabs'}
+                </button>
+                <p className="text-sm text-gray-500 mt-2">
+                  Organize open tabs into groups by bookmark category
+                </p>
+              </div>
+
+              {/* Export Button */}
+              <div>
+                <button
+                  onClick={exportToChromeBookmarkFolders}
+                  disabled={exportingToChrome || stats.byCategory.length === 0}
+                  className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <svg className="mr-2 h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                  </svg>
+                  {exportingToChrome ? 'Exporting...' : 'Export to Chrome Folders'}
+                </button>
+                <p className="text-sm text-gray-500 mt-2">
+                  Organize bookmarks into category folders
+                </p>
+              </div>
             </div>
 
             {/* Expandable Categories */}
@@ -369,18 +522,146 @@ export function Options() {
 
         {activeTab === 'settings' && (
           <div className="space-y-6">
+            {/* Permissions */}
             <div className="bg-white shadow rounded-lg p-6">
               <h2 className="text-lg font-medium text-gray-900 mb-4">Permissions</h2>
               <HistoryPermissionToggle />
             </div>
 
+            {/* v1.2.0: Auto-Bookmarking Settings */}
+            <div className="bg-white shadow rounded-lg p-6">
+              <h2 className="text-lg font-medium text-gray-900 mb-4">Auto-Bookmarking</h2>
+
+              <div className="space-y-4">
+                {/* Toggle */}
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-gray-700">Enable Auto-Bookmarking</p>
+                    <p className="text-xs text-gray-500">Automatically create bookmarks for frequently visited sites</p>
+                  </div>
+                  <button
+                    onClick={handleToggleAutoBookmark}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                      settings?.autoBookmarkEnabled ? 'bg-blue-600' : 'bg-gray-200'
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                        settings?.autoBookmarkEnabled ? 'translate-x-6' : 'translate-x-1'
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                {/* Thresholds */}
+                {settings?.autoBookmarkEnabled && (
+                  <div className="mt-4 p-4 bg-gray-50 rounded-lg">
+                    <p className="text-sm font-medium text-gray-700 mb-2">Visit Thresholds</p>
+                    <p className="text-xs text-gray-500 mb-3">
+                      Sites are auto-bookmarked when any threshold is met:
+                    </p>
+                    <div className="grid grid-cols-3 gap-4 text-center">
+                      <div className="bg-white p-3 rounded border">
+                        <div className="text-2xl font-bold text-blue-600">{settings.weeklyVisitThreshold}</div>
+                        <div className="text-xs text-gray-500">visits/week</div>
+                      </div>
+                      <div className="bg-white p-3 rounded border">
+                        <div className="text-2xl font-bold text-green-600">{settings.monthlyVisitThreshold}</div>
+                        <div className="text-xs text-gray-500">visits/month</div>
+                      </div>
+                      <div className="bg-white p-3 rounded border">
+                        <div className="text-2xl font-bold text-purple-600">{settings.quarterlyVisitThreshold}</div>
+                        <div className="text-xs text-gray-500">visits/quarter</div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* History Analysis */}
+                {hasHistoryPermission && (
+                  <div className="mt-4 border-t pt-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <div>
+                        <p className="text-sm font-medium text-gray-700">Analyze Browsing History</p>
+                        <p className="text-xs text-gray-500">
+                          {analysisStats?.hasAnalyzed
+                            ? `Last analyzed: ${new Date(analysisStats.analyzedAt!).toLocaleDateString()}`
+                            : 'Scan your history to find frequently visited sites'}
+                        </p>
+                      </div>
+                      <button
+                        onClick={handleAnalyzeHistory}
+                        disabled={isAnalyzingHistory}
+                        className="px-3 py-1 text-sm bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50"
+                      >
+                        {isAnalyzingHistory ? 'Analyzing...' : analysisStats?.hasAnalyzed ? 'Re-analyze' : 'Analyze Now'}
+                      </button>
+                    </div>
+                    {analysisStats && (
+                      <div className="text-xs text-gray-500">
+                        {analysisStats.candidateCount} URLs being tracked | {analysisStats.activeBookmarks} active bookmarks
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* v1.2.0: Natural Language Preferences */}
+            <div className="bg-white shadow rounded-lg p-6">
+              <h2 className="text-lg font-medium text-gray-900 mb-4">Smart Preferences</h2>
+              <p className="text-sm text-gray-500 mb-4">
+                Describe what to keep or ignore in plain text. For example:
+                <br />
+                <span className="text-gray-400 italic">"Keep all my work stuff", "Ignore news sites", "Always save github.com"</span>
+              </p>
+
+              <textarea
+                value={preferencesText}
+                onChange={(e) => setPreferencesText(e.target.value)}
+                onBlur={handlePreviewRules}
+                placeholder="Keep all my work stuff&#10;Ignore news sites except techcrunch.com&#10;Don't track shopping&#10;Always save github.com"
+                className="w-full h-32 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm font-mono"
+              />
+
+              {interpretedRules.length > 0 && (
+                <div className="mt-4 p-4 bg-gray-50 rounded-lg">
+                  <p className="text-sm font-medium text-gray-700 mb-2">Interpreted Rules:</p>
+                  <ul className="space-y-1 text-sm">
+                    {interpretedRules.map((rule, index) => (
+                      <li key={index} className="text-gray-600">{rule}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              <div className="mt-4 flex gap-2">
+                <button
+                  onClick={handlePreviewRules}
+                  className="px-4 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-50"
+                >
+                  Preview Rules
+                </button>
+                <button
+                  onClick={handleSavePreferences}
+                  className="px-4 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                >
+                  Save Preferences
+                </button>
+              </div>
+            </div>
+
+            {/* About */}
             <div className="bg-white shadow rounded-lg p-6">
               <h2 className="text-lg font-medium text-gray-900 mb-4">About</h2>
               <p className="text-gray-600">
-                SmartMarks v1.0.0 - Local-first bookmark organization
+                SmartMarks v1.2.0 - Local-first bookmark organization
               </p>
               <p className="text-gray-500 text-sm mt-2">
                 All data stays on your device. No external servers. No tracking.
+              </p>
+              <p className="text-gray-400 text-xs mt-4">
+                New in v1.2.0: Auto-bookmarking, tab grouping, natural language preferences
               </p>
             </div>
           </div>

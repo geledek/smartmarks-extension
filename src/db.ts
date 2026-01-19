@@ -43,16 +43,56 @@ export interface Settings {
   archiveThreshold: number;
   autoArchive: boolean;
   enableAI: boolean;
+  // v1.2.0: Auto-bookmarking settings
+  naturalLanguagePreferences?: string;
+  historyAnalyzedAt?: number;
+  weeklyVisitThreshold: number;    // default: 2
+  monthlyVisitThreshold: number;   // default: 3
+  quarterlyVisitThreshold: number; // default: 5
+  autoBookmarkEnabled: boolean;    // default: true
+}
+
+// v1.2.0: Track URLs that might become bookmarks
+export interface CandidateUrl {
+  id?: number;
+  url: string;
+  normalizedUrl: string;  // URL without tracking params
+  title: string;
+  domain: string;
+  firstSeen: number;
+  lastSeen: number;
+  visitCount: number;
+  weeklyVisits: number;
+  monthlyVisits: number;
+  quarterlyVisits: number;
+  status: 'tracking' | 'promoted' | 'dismissed' | 'excluded';
+}
+
+// v1.2.0: Natural language rules parsed from user preferences
+export interface NaturalLanguageRule {
+  id?: number;
+  rawText: string;
+  type: 'include' | 'exclude';
+  conditions: {
+    domains?: string[];
+    keywords?: string[];
+    categories?: string[];
+  };
+  priority: number;
+  isActive: boolean;
 }
 
 export interface ProcessingCheckpoint {
   id?: number;
-  jobType: 'categorize' | 'archive' | 'metadata';
+  jobType: 'categorize' | 'archive' | 'metadata' | 'historyAnalysis' | 'candidateRecalculation';
   startTime: number;
   lastProcessedId?: string;
   totalItems: number;
   processedCount: number;
   status: 'running' | 'completed' | 'failed';
+  // v1.2.0: Additional data for history analysis
+  lastProcessedIndex?: number;
+  urlStats?: unknown; // Store serialized stats for resume
 }
 
 // Database class
@@ -62,6 +102,8 @@ export class SmartMarksDB extends Dexie {
   visitHistory!: Table<VisitHistory, number>;
   settings!: Table<Settings, string>;
   checkpoints!: Table<ProcessingCheckpoint, number>;
+  candidateUrls!: Table<CandidateUrl, number>;
+  naturalLanguageRules!: Table<NaturalLanguageRule, number>;
 
   constructor() {
     super('SmartMarksDB');
@@ -80,6 +122,25 @@ export class SmartMarksDB extends Dexie {
       visitHistory: '++id, bookmarkId, timestamp',
       settings: 'userId',
       checkpoints: '++id, jobType, status'
+    });
+
+    // Version 3: Add auto-bookmarking tables
+    this.version(3).stores({
+      bookmarks: 'id, url, category, lastVisited, isPinned, isArchived',
+      categories: 'id, name',
+      visitHistory: '++id, bookmarkId, timestamp',
+      settings: 'userId',
+      checkpoints: '++id, jobType, status',
+      candidateUrls: '++id, url, normalizedUrl, domain, status',
+      naturalLanguageRules: '++id, type, isActive'
+    }).upgrade(tx => {
+      // Migrate existing settings to include new fields
+      return tx.table('settings').toCollection().modify(settings => {
+        settings.weeklyVisitThreshold = settings.weeklyVisitThreshold ?? 2;
+        settings.monthlyVisitThreshold = settings.monthlyVisitThreshold ?? 3;
+        settings.quarterlyVisitThreshold = settings.quarterlyVisitThreshold ?? 5;
+        settings.autoBookmarkEnabled = settings.autoBookmarkEnabled ?? true;
+      });
     });
   }
 
@@ -130,6 +191,11 @@ export class SmartMarksDB extends Dexie {
       archiveThreshold: 90, // days
       autoArchive: true,
       enableAI: false,
+      // v1.2.0: Auto-bookmarking defaults
+      weeklyVisitThreshold: 2,
+      monthlyVisitThreshold: 3,
+      quarterlyVisitThreshold: 5,
+      autoBookmarkEnabled: true,
     };
 
     await this.settings.add(defaultSettings);
