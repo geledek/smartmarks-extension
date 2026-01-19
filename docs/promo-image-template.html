@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=440, height=280">
+  <title>SmartMarks Promo Image</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      width: 440px;
+      height: 280px;
+      overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+
+    .container {
+      width: 440px;
+      height: 280px;
+      background: linear-gradient(135deg, #1E293B 0%, #312E81 50%, #1E293B 100%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* Decorative background elements */
+    .bg-element {
+      position: absolute;
+      border-radius: 50%;
+      opacity: 0.1;
+    }
+
+    .bg-1 {
+      width: 200px;
+      height: 200px;
+      background: #3B82F6;
+      top: -50px;
+      left: -50px;
+    }
+
+    .bg-2 {
+      width: 150px;
+      height: 150px;
+      background: #8B5CF6;
+      bottom: -30px;
+      right: -30px;
+    }
+
+    /* Main content */
+    .content {
+      position: relative;
+      z-index: 10;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 16px;
+    }
+
+    /* Logo area */
+    .logo-container {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .logo-icon {
+      width: 56px;
+      height: 56px;
+      background: linear-gradient(135deg, #3B82F6, #8B5CF6);
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 4px 20px rgba(59, 130, 246, 0.4);
+    }
+
+    .logo-icon svg {
+      width: 32px;
+      height: 32px;
+      fill: white;
+    }
+
+    .logo-text {
+      font-size: 32px;
+      font-weight: 700;
+      color: white;
+      letter-spacing: -0.5px;
+    }
+
+    /* Tagline */
+    .tagline {
+      font-size: 14px;
+      color: rgba(255, 255, 255, 0.8);
+      text-align: center;
+      max-width: 300px;
+    }
+
+    /* Feature pills */
+    .features {
+      display: flex;
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    .feature-pill {
+      background: rgba(255, 255, 255, 0.15);
+      backdrop-filter: blur(10px);
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-size: 11px;
+      color: white;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+
+    /* Visual representation of organization */
+    .visual {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      margin-top: 12px;
+    }
+
+    .chaos, .order {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      width: 80px;
+    }
+
+    .chaos .dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 3px;
+      opacity: 0.6;
+    }
+
+    .order .dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 3px;
+      opacity: 0.9;
+    }
+
+    .arrow {
+      font-size: 24px;
+      color: #10B981;
+    }
+
+    /* Color dots */
+    .dot.blue { background: #3B82F6; }
+    .dot.green { background: #10B981; }
+    .dot.purple { background: #8B5CF6; }
+    .dot.red { background: #EF4444; }
+    .dot.yellow { background: #F59E0B; }
+    .dot.cyan { background: #06B6D4; }
+    .dot.gray { background: #6B7280; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Background decorations -->
+    <div class="bg-element bg-1"></div>
+    <div class="bg-element bg-2"></div>
+
+    <!-- Main content -->
+    <div class="content">
+      <div class="logo-container">
+        <div class="logo-icon">
+          <!-- Bookmark icon -->
+          <svg viewBox="0 0 24 24">
+            <path d="M17 3H7c-1.1 0-2 .9-2 2v16l7-3 7 3V5c0-1.1-.9-2-2-2zm0 15l-5-2.18L7 18V5h10v13z"/>
+          </svg>
+        </div>
+        <span class="logo-text">SmartMarks</span>
+      </div>
+
+      <p class="tagline">Auto-organize bookmarks from your browsing habits</p>
+
+      <div class="features">
+        <span class="feature-pill">Auto-Bookmark</span>
+        <span class="feature-pill">Tab Groups</span>
+        <span class="feature-pill">100% Local</span>
+      </div>
+
+      <!-- Visual: Chaos to Order -->
+      <div class="visual">
+        <div class="chaos">
+          <div class="dot gray"></div>
+          <div class="dot blue"></div>
+          <div class="dot gray"></div>
+          <div class="dot purple"></div>
+          <div class="dot gray"></div>
+          <div class="dot green"></div>
+          <div class="dot red"></div>
+          <div class="dot gray"></div>
+          <div class="dot yellow"></div>
+        </div>
+        <span class="arrow">→</span>
+        <div class="order">
+          <div class="dot blue"></div>
+          <div class="dot blue"></div>
+          <div class="dot blue"></div>
+          <div class="dot green"></div>
+          <div class="dot green"></div>
+          <div class="dot green"></div>
+          <div class="dot purple"></div>
+          <div class="dot purple"></div>
+          <div class="dot purple"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
